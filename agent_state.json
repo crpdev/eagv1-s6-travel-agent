@@ -1,0 +1,19 @@
+{
+  "preferences": {
+    "What type of destinations do you prefer (urban/nature/beach/etc.)?": "hill station",
+    "What's your preferred travel budget (budget/moderate/luxury)?": "budget",
+    "What activities interest you most while traveling?": "relaxed natural ambience",
+    "Any dietary restrictions or preferences?": "non-veg preferred",
+    "Do you prefer popular tourist spots or off-the-beaten-path locations?": "soothing feel of nature"
+  },
+  "history": [
+    {
+      "user_input": "vaalparai",
+      "processed_input": {
+        "processed_input": "Destination: Valparai\n\nSuggested Activities:\n- Tea Estate Visit: Explore the sprawling tea gardens, learn about tea processing, and enjoy the scenic views.\n- Sholayar Dam Visit: Visit the dam for panoramic views of the surrounding forests and reservoir.\n- Hiking to Nallamudi Viewpoint: Hike through tea estates to reach a viewpoint offering stunning views of the Anamalai hills.\n\nBudget Alignment: (YES) Valparai offers budget-friendly accommodation options and local eateries.\n\nReasoning: Valparai fits the user's preference for a hill station with a relaxed natural ambiance and avoids crowded tourist spots. The activities focus on natural beauty and are generally low-cost.\n",
+        "success": true,
+        "error": null,
+        "is_clarification_response": false
+      },
+      "decision": [
+        
