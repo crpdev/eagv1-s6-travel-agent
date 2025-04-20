@@ -1,7 +1,11 @@
 import google.generativeai as genai
-from typing import Dict, List, Optional, Callable
+from typing import Dict, List, Optional
 from functools import partial
 from logger_config import get_logger
+from models import (
+    UserPreferences, ProcessedInput, PreferenceQuestion,
+    BudgetLevel, TravelRecommendation, Activity
+)
 
 logger = get_logger(__name__)
 
@@ -10,43 +14,64 @@ _chat_session = None
 
 def configure_gemini(api_key: str) -> None:
     """Configure Gemini with the provided API key."""
-    logger.info("Configuring Gemini API", extra_data={'api_key_length': len(api_key)})
+    logger.info("Configuring Gemini API", 
+                extra_data={
+                    'api_key_exists': bool(api_key),
+                    'api_key_length': len(api_key) if api_key else 0
+                })
     try:
+        if not api_key:
+            raise ValueError("API key cannot be empty")
+        
+        # Configure with explicit key
         genai.configure(api_key=api_key)
-        logger.debug("Gemini API configured successfully")
+        
+        # Verify configuration by attempting to create a model
+        model = genai.GenerativeModel('gemini-pro')
+        logger.debug("Successfully created Gemini model")
+        
+        logger.info("Gemini API configured successfully")
     except Exception as e:
-        logger.error("Failed to configure Gemini API", extra_data={'error': str(e)})
-        raise
+        logger.error("Failed to configure Gemini API", 
+                    extra_data={
+                        'error': str(e),
+                        'error_type': type(e).__name__
+                    })
+        raise ValueError(f"Failed to configure Gemini API: {str(e)}")
 
-def get_user_preferences() -> Dict[str, str]:
+def get_user_preferences() -> UserPreferences:
     """Gather initial user preferences through a structured conversation."""
     logger.info("Starting user preference collection")
-    
-    questions = [
-        "What type of destinations do you prefer (urban/nature/beach/etc.)?",
-        "What's your preferred travel budget (budget/moderate/luxury)?",
-        "What activities interest you most while traveling?",
-        "Any dietary restrictions or preferences?",
-        "Do you prefer popular tourist spots or off-the-beaten-path locations?"
-    ]
     
     preferences = {}
     print("\nLet's get to know your travel preferences better!")
     
-    for question in questions:
-        logger.debug("Asking preference question", extra_data={'question': question})
-        answer = input(f"\n{question}\n> ")
-        preferences[question] = answer
+    for question in PreferenceQuestion:
+        logger.debug("Asking preference question", extra_data={'question': question.value})
+        answer = input(f"\n{question.value}\n> ")
+        preferences[question.name.lower()] = answer
         logger.debug("Received preference answer", 
-                    extra_data={'question': question, 'answer': answer})
+                    extra_data={'question': question.value, 'answer': answer})
     
-    logger.info("Completed user preference collection", 
-                extra_data={'num_preferences': len(preferences)})
-    return preferences
+    try:
+        user_prefs = UserPreferences(
+            destination_type=preferences['destination_type'],
+            budget=preferences['budget'],
+            activities=preferences['activities'],
+            dietary_restrictions=preferences['dietary'],
+            location_preference=preferences['location_type']
+        )
+        logger.info("Completed user preference collection", 
+                    extra_data={'preferences': user_prefs.dict()})
+        return user_prefs
+    except Exception as e:
+        logger.error("Failed to validate user preferences", 
+                    extra_data={'error': str(e), 'preferences': preferences})
+        raise
 
-def create_system_prompt(preferences: Dict[str, str]) -> str:
+def create_system_prompt(preferences: UserPreferences) -> str:
     """Create a personalized system prompt based on user preferences."""
-    logger.debug("Creating system prompt", extra_data={'num_preferences': len(preferences)})
+    logger.debug("Creating system prompt", extra_data={'preferences': preferences.dict()})
     
     base_prompt = """You are an intelligent travel advisor AI with expertise in creating personalized travel recommendations. 
 
@@ -78,8 +103,13 @@ Reasoning: [2-3 sentences explaining why this matches their preferences]
 Current user preferences:
 """
     
-    preferences_text = "\n".join(f"- {question}: {answer}" 
-                               for question, answer in preferences.items())
+    preferences_text = f"""
+- Destination Type: {preferences.destination_type}
+- Budget Level: {preferences.budget}
+- Preferred Activities: {preferences.activities}
+- Dietary Restrictions: {preferences.dietary_restrictions or 'None'}
+- Location Preference: {preferences.location_preference}
+"""
     prompt = base_prompt + preferences_text
     
     logger.debug("System prompt created", 
@@ -103,8 +133,8 @@ Reasoning: [2-3 sentences explaining specifically how this destination and activ
 
 def process_input(user_input: str, 
                  context: Dict, 
-                 preferences: Dict[str, str],
-                 is_clarification_response: bool = False) -> Dict:
+                 preferences: UserPreferences,
+                 is_clarification_response: bool = False) -> ProcessedInput:
     """Process user input using Gemini with context and preferences."""
     global _chat_session
     
@@ -112,7 +142,7 @@ def process_input(user_input: str,
                 extra_data={
                     'input_length': len(user_input),
                     'context_size': len(context),
-                    'num_preferences': len(preferences),
+                    'preferences': preferences.dict(),
                     'is_clarification': is_clarification_response
                 })
     
@@ -177,35 +207,37 @@ Only ask for clarification if critical information is missing.
         
         # Send user input and get response
         response = _chat_session.send_message(formatted_input)
+        response_text = response.text if response and response.text else ""
         
         # Log the response received from the model
         logger.debug("Received response from model", 
                     extra_data={
-                        'model_response': response.text,
-                        'response_length': len(response.text)
+                        'model_response': response_text,
+                        'response_length': len(response_text)
                     })
         
         logger.info("Successfully processed input", 
-                   extra_data={'response_length': len(response.text)})
+                   extra_data={'response_length': len(response_text)})
         
-        return {
-            "processed_input": response.text,
-            "success": True,
-            "error": None,
-            "is_clarification_response": is_clarification_response
-        }
+        return ProcessedInput(
+            processed_input=response_text,
+            success=bool(response_text),
+            error=None if response_text else "No response received from model",
+            is_clarification_response=is_clarification_response
+        )
     except Exception as e:
+        error_msg = str(e)
         logger.error("Failed to process input", 
                     extra_data={
-                        'error': str(e),
+                        'error': error_msg,
                         'error_type': type(e).__name__,
                         'formatted_input': formatted_input if 'formatted_input' in locals() else None
                     })
         # Reset chat session on error
         _chat_session = None
-        return {
-            "processed_input": None,
-            "success": False,
-            "error": str(e),
-            "is_clarification_response": is_clarification_response
-        } 
+        return ProcessedInput(
+            processed_input="",  # Empty string instead of None
+            success=False,
+            error=error_msg,
+            is_clarification_response=is_clarification_response
+        ) 
